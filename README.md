@@ -1,0 +1,202 @@
+# OpenClaw Workstation
+
+A full Linux desktop with OpenClaw AI pre-installed, accessible from your browser.
+
+## What You Get
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Your Browser                                               │
+│  https://workstation.your-domain.com                        │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│  All-in-One Container                                       │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Linux Desktop (Ubuntu XFCE)                        │    │
+│  │  - Firefox, Terminal, File Manager                  │    │
+│  │  - OpenClaw Gateway (background service)            │    │
+│  │                                                     │    │
+│  │  Access from inside:                                │    │
+│  │  → http://localhost:18789     (OpenClaw Dashboard)  │    │
+│  │  → http://localhost:3001+     (Dev Servers)         │    │
+│  └─────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key benefit:** Since OpenClaw runs *inside* the same container, any dev server it spins up is accessible at `localhost:PORT` from the desktop browser.
+
+## Quick Start (Coolify)
+
+1. **Create New Resource** → **Private Repository (with App)**
+2. **Build Pack:** `Dockerfile`
+3. **Base Directory:** `/docs/Longtermtrends-Content/Agents/OpenClaw-Workstation`
+4. **Dockerfile Location:** `/Dockerfile`
+5. **Ports Exposes:** `3000`
+
+## Environment Variables
+
+Set these in Coolify's Environment Variables tab:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENCLAW_TOKEN` | ✅ | Auth token (generate: `openssl rand -hex 32`) |
+| `OPENROUTER_API_KEY` | ✅ | OpenRouter key |
+| `OPENROUTER_API_BASE_URL` | ❌ | OpenRouter base URL (default: `https://openrouter.ai/api/v1`) |
+| `OPENROUTER_MODEL_ID` | ❌ | OpenRouter model ID (default: `minimax/minimax-m2.5`) |
+| `GEMINI_API_KEY` | ❌ | Google AI fallback key |
+| `ANTHROPIC_API_KEY` | ❌ | Anthropic fallback key |
+| `OPENAI_API_KEY` | ❌ | OpenAI fallback key |
+| `TELEGRAM_BOT_TOKEN` | ❌ | Telegram Bot Token |
+| `BRAVE_API_KEY` | ❌ | Brave Search key |
+| `WORKSTATION_PASSWORD` | ✅ | Desktop password (CRITICAL FOR SECURITY) |
+| `CUSTOM_USER` | ❌ | Username (default: `abc`) |
+| `FILE_MANAGER_PATH` | ❌ | Sidebar upload/download path (default: `/config/uploads`) |
+| `TZ` | ❌ | Timezone (default: `Europe/Berlin`) |
+| `OPENCLAW_LOG_LEVEL` | ❌ | File log level (`info`, `debug`, etc.) |
+| `OPENCLAW_CONSOLE_LOG_LEVEL` | ❌ | Console log level (`info`, `debug`, etc.) |
+| `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS` | ❌ | Comma-separated Control UI origins (example: `https://workstation.example.com,https://foo.example.com`) |
+| `SELKIES_MANUAL_WIDTH` | ❌ | Desktop width (default in this image: `1600`) |
+| `SELKIES_MANUAL_HEIGHT` | ❌ | Desktop height (default in this image: `900`) |
+| `SELKIES_FRAMERATE` | ❌ | Desktop stream FPS (default in this image: `24`) |
+| `SELKIES_H264_CRF` | ❌ | H.264 quality/CPU tradeoff (default in this image: `30`) |
+| `MAX_RESOLUTION` | ❌ | Max desktop resolution (default in this image: `1920x1080`) |
+| `START_DOCKER` | ❌ | Keep disabled (`false`) to avoid extra DinD overhead |
+
+*OpenRouter is the default provider for this workstation setup.
+
+## Domains
+
+| Service | Port | Domain |
+|---------|------|----------------|
+| `workstation` | 3000 | `https://w04ko4scws0sosogooocs8s8.46.224.23.170.sslip.io` |
+
+> OpenClaw is now accessed from *inside* the desktop at `localhost:18789`, not via a separate domain.
+
+## Usage
+
+1. **Access the Desktop:** Open [Workstation URL](https://w04ko4scws0sosogooocs8s8.46.224.23.170.sslip.io) in your browser.
+   - **Username:** `abc`
+   - **Password:** [Your `WORKSTATION_PASSWORD`]
+2. **Open Firefox** (pre-installed in the desktop).
+3. **Access OpenClaw:** Go to `http://localhost:18789/chat?session=main&token=YOUR_TOKEN`
+   > **Note:** You MUST include the `token` parameter in the URL to authenticate.
+4. **Dev Servers:** Any server OpenClaw starts is accessible at `http://localhost:PORT`
+
+### OpenRouter SDK Streaming Example
+
+```ts
+import { OpenRouter } from "@openrouter/sdk";
+
+const openrouter = new OpenRouter({
+  apiKey: "<OPENROUTER_API_KEY>"
+});
+
+// Stream the response to get reasoning tokens in usage
+const stream = await openrouter.chat.send({
+  model: "minimax/minimax-m2.5",
+  messages: [
+    {
+      role: "user",
+      content: "How many r's are in the word 'strawberry'?"
+    }
+  ],
+  stream: true
+});
+
+let response = "";
+for await (const chunk of stream) {
+  const content = chunk.choices[0]?.delta?.content;
+  if (content) {
+    response += content;
+    process.stdout.write(content);
+  }
+
+  // Usage information comes in the final chunk
+  if (chunk.usage) {
+    console.log("\nReasoning tokens:", chunk.usage.reasoningTokens);
+  }
+}
+```
+
+## Files
+
+```
+OpenClaw-Workstation/
+├── Dockerfile             # Webtop + OpenClaw (all-in-one)
+├── docker-compose.yml     # Single service deployment
+├── docker-entrypoint.sh   # OpenClaw startup script
+├── .env.example           # Environment template
+├── DEPLOY_COOLIFY.md      # Detailed deployment guide
+├── ALTERNATIVE_GUACAMOLE_XRDP.md  # Browser-first fallback option
+├── workstation-filemanager-path  # Boot-time upload path permission fixer
+└── README.md              # This file
+```
+
+## How It Works
+
+1. Container starts with LinuxServer.io's Webtop base image (Ubuntu KDE)
+2. Our custom script (`openclaw-run`) runs via S6 overlay's `services.d` to keep OpenClaw running.
+3. OpenClaw gateway starts in background on port 18789
+4. You access the desktop via browser on port 3000
+5. From inside the desktop, `localhost:18789` = OpenClaw, `localhost:3001+` = dev servers
+
+## Technical Details
+
+We use several configuration overrides to make OpenClaw work smoothly in this containerized "inception" environment:
+
+- **Service Management**: OpenClaw is now fully integrated as an S6 service (`/etc/services.d/openclaw/run`). This replaces the previous `custom-cont-init.d` approach.
+  - Usage of `exec` ensures simple process monitoring and signal propagation.
+  - Automatic restart on failure.
+- **Permissions**: We force ownership of the `/config` directory to user `911` (abc/ubuntu) and set `chmod 755` so the desktop user (and local apps) can read the auto-generated config/token.
+- **File Upload Persistence**: A boot init helper now ensures `FILE_MANAGER_PATH` (default `/config/uploads`) exists and is writable for the desktop user on every start.
+- **Environment**: `HOME` is explicitly set to `/config` for the OpenClaw process to ensure persistent state handling matches the container's volume strategy.
+- **Persistent Logs**: Logs are now moved from `/tmp` to `/config/.openclaw/logs/openclaw.log` to survive container restarts.
+- **Safe Config Merging**: The startup script now respects existing tokens and settings in `openclaw.json` unless explicitly overridden by environment variables.
+- **Control UI Boot Safety**: For non-loopback binds (`--bind lan`), startup now always writes a valid `gateway.controlUi` config to prevent the gateway crash loop. You can optionally lock origins using `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS`.
+- **Cleanups**: `xfce4-power-manager` was removed from the Dockerfile to prevent "Permission denied" errors impacting the dbus/logging services in the unprivileged container environment.
+
+### 4.1. Tips & Tricks
+
+**Copy/Paste (Clipboard)**
+- **Chrome/Edge**: Text usually syncs automatically.
+- **Firefox/Safari**:
+  1. Open the **Sidebar Menu** (click the arrow on the left edge or swipe right).
+  2. Click the **Clipboard** icon.
+  3. Paste your text into the text box there.
+  4. Now you can paste (`Ctrl+V`) inside the Linux desktop.
+
+### Configuration Notes
+
+Unsupported keys in this OpenClaw build (schema validation errors):
+
+- `gateway.allowedHosts`
+- `gateway.auth.dangerouslyDisableDeviceAuth`
+
+Use `gateway.controlUi.allowedOrigins` instead (via `OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS`) when you need explicit Control UI origin allowlisting.
+
+## Security
+
+> [!WARNING]
+> The desktop is accessible to anyone with the URL. Set `WORKSTATION_PASSWORD` for protection, or use Coolify's Basic Auth feature.
+
+## Troubleshooting
+
+### OpenClaw not starting
+Check the gateway log inside the desktop:
+```bash
+cat /config/.openclaw/logs/openclaw.log
+```
+
+### Desktop is slow
+- Use Chrome or Edge (better than Firefox for streaming)
+- Ensure VPS has 4GB+ RAM
+- Check network latency to your VPS
+
+### Can't find OpenClaw CLI
+Open terminal in the desktop and run:
+```bash
+openclaw --version
+openclaw doctor
+```

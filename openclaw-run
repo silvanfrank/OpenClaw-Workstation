@@ -1,0 +1,344 @@
+#!/usr/bin/with-contenv bash
+set -e
+
+# S6 Service Run Script for OpenClaw Gateway
+# This script is supervised by S6. It runs in the foreground.
+
+log() {
+  echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')] $1"
+}
+
+log "🦞 OpenClaw Service Starting..."
+log "👤 User: $(whoami) (UID: $(id -u))"
+log "🏠 HOME: $HOME"
+
+CONFIG_DIR="/config/.openclaw"
+CONFIG_FILE="$CONFIG_DIR/openclaw.json"
+LOG_DIR="$CONFIG_DIR/logs"
+LOG_FILE="$LOG_DIR/openclaw.log"
+AGENT_DIR="$CONFIG_DIR/agents/main/agent"
+AUTH_FILE="$AGENT_DIR/auth-profiles.json"
+CREDENTIALS_DIR="$CONFIG_DIR/credentials"
+
+mkdir -p "$CONFIG_DIR"
+mkdir -p "$LOG_DIR"
+mkdir -p "$AGENT_DIR"
+mkdir -p "$CREDENTIALS_DIR"
+
+# Ensure config is accessible securely
+# We don't need complex symlinks if we force HOME=/config correctly,
+# but keeping them doesn't hurt for other tools.
+if [ "$CONFIG_DIR" != "/root/.openclaw" ]; then
+  mkdir -p /root
+  ln -sfn "$CONFIG_DIR" /root/.openclaw
+fi
+
+if [ -d "/config" ] && [ "$CONFIG_DIR" != "/config/.openclaw" ]; then
+   ln -sfn "$CONFIG_DIR" /config/.openclaw
+fi
+
+# Determine Gateway Token
+# Priority: 1. ENV, 2. Existing Config, 3. New Generation
+if [ -n "$OPENCLAW_TOKEN" ] && [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
+  OPENCLAW_GATEWAY_TOKEN="$OPENCLAW_TOKEN"
+fi
+
+if [ -z "$OPENCLAW_GATEWAY_TOKEN" ] && [ -f "$CONFIG_FILE" ]; then
+  OPENCLAW_GATEWAY_TOKEN=$(jq -r '.gateway.auth.token // empty' "$CONFIG_FILE")
+  if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
+    log "🔑 Using existing auth token from config"
+  fi
+fi
+
+if [ -z "$OPENCLAW_GATEWAY_TOKEN" ]; then
+  OPENCLAW_GATEWAY_TOKEN=$(openssl rand -hex 32)
+  log "🔐 Generated new auth token: $OPENCLAW_GATEWAY_TOKEN"
+fi
+
+# Determine Trusted Proxies
+# Priority: 1. ENV, 2. Existing Config, 3. Defaults
+if [ -n "$OPENCLAW_GATEWAY_TRUSTED_PROXIES" ]; then
+  PROXIES_JSON=$(echo "$OPENCLAW_GATEWAY_TRUSTED_PROXIES" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
+elif [ -f "$CONFIG_FILE" ]; then
+  PROXIES_JSON=$(jq -c '.gateway.trustedProxies // empty' "$CONFIG_FILE")
+fi
+
+if [ -z "$PROXIES_JSON" ] || [ "$PROXIES_JSON" = "null" ]; then
+  PROXIES_JSON='["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1", "::1"]'
+  log "ℹ️ Using default trusted proxies"
+fi
+
+# Determine Control UI Origins
+# Priority: 1. ENV, 2. Existing Config, 3. Fallback mode
+CONTROL_UI_ALLOWED_ORIGINS_JSON=""
+CONTROL_UI_HOST_HEADER_FALLBACK="true"
+
+if [ -n "$OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS" ]; then
+  CONTROL_UI_ALLOWED_ORIGINS_JSON=$(echo "$OPENCLAW_CONTROL_UI_ALLOWED_ORIGINS" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
+  CONTROL_UI_HOST_HEADER_FALLBACK="false"
+elif [ -f "$CONFIG_FILE" ]; then
+  CONTROL_UI_ALLOWED_ORIGINS_JSON=$(jq -c '.gateway.controlUi.allowedOrigins // empty' "$CONFIG_FILE")
+  if [ -n "$CONTROL_UI_ALLOWED_ORIGINS_JSON" ] && [ "$CONTROL_UI_ALLOWED_ORIGINS_JSON" != "null" ] && [ "$CONTROL_UI_ALLOWED_ORIGINS_JSON" != "[]" ]; then
+    CONTROL_UI_HOST_HEADER_FALLBACK=$(jq -r '.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback // false' "$CONFIG_FILE")
+  fi
+fi
+
+# OpenRouter defaults (OpenAI-compatible endpoint)
+OPENROUTER_API_BASE_URL="${OPENROUTER_API_BASE_URL:-https://openrouter.ai/api/v1}"
+OPENROUTER_MODEL_ID="${OPENROUTER_MODEL_ID:-minimax/minimax-m2.5}"
+OPENROUTER_MODEL_REF="openrouter/$OPENROUTER_MODEL_ID"
+
+# Determine default model
+DEFAULT_MODEL="$OPENROUTER_MODEL_REF"
+
+if [ -n "$OPENCLAW_AGENT_MODEL" ]; then
+  DEFAULT_MODEL="$OPENCLAW_AGENT_MODEL"
+elif [ -n "$OPENROUTER_API_KEY" ]; then
+  DEFAULT_MODEL="$OPENROUTER_MODEL_REF"
+elif [ -n "$ANTHROPIC_API_KEY" ]; then
+  DEFAULT_MODEL="anthropic/claude-sonnet-4-20250514"
+elif [ -n "$OPENAI_API_KEY" ]; then
+  DEFAULT_MODEL="openai/gpt-4o"
+elif [ -n "$GEMINI_API_KEY" ]; then
+  DEFAULT_MODEL="google/gemini-3-flash-preview"
+fi
+
+log "🦞 OpenClaw Configuration"
+log "--------------------------------"
+log "Trusted Proxies: $PROXIES_JSON"
+if [ -n "$CONTROL_UI_ALLOWED_ORIGINS_JSON" ] && [ "$CONTROL_UI_ALLOWED_ORIGINS_JSON" != "null" ] && [ "$CONTROL_UI_ALLOWED_ORIGINS_JSON" != "[]" ]; then
+  log "Control UI Allowed Origins: $CONTROL_UI_ALLOWED_ORIGINS_JSON"
+else
+  log "Control UI Allowed Origins: (none, host-header fallback enabled)"
+fi
+log "Auth Token: $OPENCLAW_GATEWAY_TOKEN"
+log "Default Model: $DEFAULT_MODEL"
+
+# Determine Logging Strategy
+# Priority: 1. ENV, 2. Existing Config, 3. Defaults
+LOG_LEVEL="${OPENCLAW_LOG_LEVEL:-info}"
+CONSOLE_LOG_LEVEL="${OPENCLAW_CONSOLE_LOG_LEVEL:-info}"
+
+# Determine Log File Path
+# If it exists in config and is NOT in /tmp, we keep it.
+EXISTING_LOG_FILE=""
+if [ -f "$CONFIG_FILE" ]; then
+  EXISTING_LOG_FILE=$(jq -r '.logging.file // empty' "$CONFIG_FILE")
+fi
+
+if [[ -n "$EXISTING_LOG_FILE" ]] && [[ "$EXISTING_LOG_FILE" != /tmp/* ]]; then
+  LOG_FILE_PATH="$EXISTING_LOG_FILE"
+  log "📝 Using existing persistent log file: $LOG_FILE_PATH"
+else
+  LOG_FILE_PATH="/config/.openclaw/logs/openclaw.log"
+  log "📝 Using default persistent log file: $LOG_FILE_PATH"
+fi
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE_PATH")"
+
+log "Log Level: $LOG_LEVEL (File) / $CONSOLE_LOG_LEVEL (Console)"
+log "--------------------------------"
+
+# Build channels config
+CHANNELS_JSON=""
+
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+  echo -n "$TELEGRAM_BOT_TOKEN" > "$CREDENTIALS_DIR/telegram-bot-token"
+  CHANNELS_JSON="\"telegram\": { \"tokenFile\": \"$CREDENTIALS_DIR/telegram-bot-token\" }"
+  echo "📱 Telegram channel configured"
+fi
+
+if [ -n "$DISCORD_BOT_TOKEN" ]; then
+  echo -n "$DISCORD_BOT_TOKEN" > "$CREDENTIALS_DIR/discord-bot-token"
+  if [ -n "$CHANNELS_JSON" ]; then CHANNELS_JSON="$CHANNELS_JSON,"; fi
+  CHANNELS_JSON="$CHANNELS_JSON\"discord\": { \"tokenFile\": \"$CREDENTIALS_DIR/discord-bot-token\" }"
+  echo "📱 Discord channel configured"
+fi
+
+if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_APP_TOKEN" ]; then
+  echo -n "$SLACK_BOT_TOKEN" > "$CREDENTIALS_DIR/slack-bot-token"
+  echo -n "$SLACK_APP_TOKEN" > "$CREDENTIALS_DIR/slack-app-token"
+  if [ -n "$CHANNELS_JSON" ]; then CHANNELS_JSON="$CHANNELS_JSON,"; fi
+  CHANNELS_JSON="$CHANNELS_JSON\"slack\": { \"botTokenFile\": \"$CREDENTIALS_DIR/slack-bot-token\", \"appTokenFile\": \"$CREDENTIALS_DIR/slack-app-token\" }"
+  echo "📱 Slack channel configured"
+fi
+
+# Initialize or merge gateway config
+if [ ! -f "$CONFIG_FILE" ]; then
+    log "📄 Creating initial gateway config..."
+    cat > "$CONFIG_FILE" << EOF
+{
+  "gateway": {
+    "trustedProxies": $PROXIES_JSON,
+    "controlUi": {
+      "dangerouslyAllowHostHeaderOriginFallback": $CONTROL_UI_HOST_HEADER_FALLBACK
+    },
+    "auth": {
+      "mode": "token",
+      "token": "$OPENCLAW_GATEWAY_TOKEN"
+    }
+  },
+  "logging": {
+    "file": "$LOG_FILE_PATH",
+    "level": "$LOG_LEVEL",
+    "consoleLevel": "$CONSOLE_LOG_LEVEL"
+  },
+  "agents": {
+    "defaults": { "model": { "primary": "$DEFAULT_MODEL" } },
+    "list": [
+      { "id": "main", "name": "OpenClaw", "subagents": { "allowAgents": ["architect", "security-auditor", "code-reviewer", "ux-manager"] } },
+      { "id": "architect", "name": "Architect", "identity": { "name": "Architect", "emoji": "🏛️" }, "tools": { "profile": "coding", "deny": ["browser", "message"] } },
+      { "id": "security-auditor", "name": "Security Auditor", "identity": { "name": "Security Auditor", "emoji": "🔒" }, "tools": { "profile": "coding", "deny": ["browser", "message"] } },
+      { "id": "code-reviewer", "name": "Code Reviewer", "identity": { "name": "Code Reviewer", "emoji": "📝" }, "tools": { "profile": "coding", "deny": ["browser", "message"] } },
+      { "id": "ux-manager", "name": "UX Manager", "identity": { "name": "UX Manager", "emoji": "🎨" }, "tools": { "profile": "coding", "deny": ["message"] } }
+    ]
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "openrouter": {
+        "baseUrl": "$OPENROUTER_API_BASE_URL",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "$OPENROUTER_MODEL_ID",
+            "name": "MiniMax M2.5 (OpenRouter)",
+            "reasoning": true,
+            "input": ["text"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            "contextWindow": 256000,
+            "maxTokens": 16384
+          }
+        ]
+      }
+    }
+  }
+}
+EOF
+else
+    log "📄 Merging environment updates into existing config..."
+    # Update gateway settings and logging using safer jq --arg
+    jq --arg token "$OPENCLAW_GATEWAY_TOKEN" \
+       --arg logFile "$LOG_FILE_PATH" \
+       --arg logLevel "$LOG_LEVEL" \
+       --arg consoleLevel "$CONSOLE_LOG_LEVEL" \
+       --arg controlUiHostHeaderFallback "$CONTROL_UI_HOST_HEADER_FALLBACK" \
+       --arg argproxies "$PROXIES_JSON" \
+       '.gateway.trustedProxies = ($argproxies | fromjson) | 
+        .gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = ($controlUiHostHeaderFallback == "true") |
+        .gateway.auth.token = $token | 
+        .logging.file = $logFile | 
+        .logging.level = $logLevel | 
+        .logging.consoleLevel = $consoleLevel' \
+        "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+    # Update default model if set
+    jq --arg model "$DEFAULT_MODEL" ".agents.defaults.model.primary = \$model" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+    # Ensure OpenRouter provider definition is present/updated
+    jq --arg baseUrl "$OPENROUTER_API_BASE_URL" \
+       --arg modelId "$OPENROUTER_MODEL_ID" \
+       '.models.mode = "merge" |
+        .models.providers.openrouter = {
+          "baseUrl": $baseUrl,
+          "api": "openai-completions",
+          "models": [
+            {
+              "id": $modelId,
+              "name": "MiniMax M2.5 (OpenRouter)",
+              "reasoning": true,
+              "input": ["text"],
+              "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+              "contextWindow": 256000,
+              "maxTokens": 16384
+            }
+          ]
+        }' \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+fi
+
+# Respect explicit allowed origins when provided via ENV or existing config.
+# This must run for both first boot and merge paths.
+if [ -n "$CONTROL_UI_ALLOWED_ORIGINS_JSON" ] && [ "$CONTROL_UI_ALLOWED_ORIGINS_JSON" != "null" ] && [ "$CONTROL_UI_ALLOWED_ORIGINS_JSON" != "[]" ]; then
+  jq --arg controlUiAllowedOrigins "$CONTROL_UI_ALLOWED_ORIGINS_JSON" \
+     '.gateway.controlUi.allowedOrigins = ($controlUiAllowedOrigins | fromjson) |
+      .gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = false' \
+     "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+fi
+
+# Update channels if environment variables are provided
+# Note: This updates the config if the ENV is set, but won't delete existing config if ENV is missing
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+    log "📱 Configuring Telegram from ENV..."
+    jq ".channels.telegram = { \"enabled\": true, \"botToken\": \"$TELEGRAM_BOT_TOKEN\", \"dmPolicy\": \"pairing\", \"groupPolicy\": \"allowlist\", \"streamMode\": \"partial\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+fi
+
+if [ -n "$DISCORD_BOT_TOKEN" ]; then
+    log "📱 Configuring Discord from ENV..."
+    jq ".channels.discord = { \"enabled\": true, \"botToken\": \"$DISCORD_BOT_TOKEN\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+fi
+
+log "✅ Gateway config updated/verified at $CONFIG_FILE"
+
+# Create agent auth-profiles.json
+echo "🔑 Configuring agent API keys..."
+
+AUTH_JSON='{"version":1,"profiles":{'
+
+if [ -n "$OPENROUTER_API_KEY" ]; then
+  AUTH_JSON="${AUTH_JSON}\"openrouter:default\":{\"type\":\"api_key\",\"provider\":\"openrouter\",\"key\":\"$OPENROUTER_API_KEY\"},"
+  echo "   ✓ OpenRouter API key configured"
+fi
+
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+  AUTH_JSON="${AUTH_JSON}\"anthropic:default\":{\"type\":\"api_key\",\"provider\":\"anthropic\",\"key\":\"$ANTHROPIC_API_KEY\"},"
+  echo "   ✓ Anthropic API key configured"
+fi
+
+if [ -n "$GEMINI_API_KEY" ]; then
+  AUTH_JSON="${AUTH_JSON}\"google:default\":{\"type\":\"api_key\",\"provider\":\"google\",\"key\":\"$GEMINI_API_KEY\"},"
+  echo "   ✓ Google/Gemini API key configured"
+fi
+
+if [ -n "$OPENAI_API_KEY" ]; then
+  AUTH_JSON="${AUTH_JSON}\"openai:default\":{\"type\":\"api_key\",\"provider\":\"openai\",\"key\":\"$OPENAI_API_KEY\"},"
+  echo "   ✓ OpenAI API key configured"
+fi
+
+AUTH_JSON="${AUTH_JSON%,}}}"
+
+echo "$AUTH_JSON" > "$AUTH_FILE"
+log "✅ Agent auth config created at $AUTH_FILE"
+
+# Fix permissions so that the Desktop user (abc/911) can read the config
+# This is crucial so that local apps can discover the token
+log "🔧 Setting permissions on $CONFIG_DIR..."
+chown -R 911:911 "$CONFIG_DIR" || log "⚠️ Failed to chown $CONFIG_DIR (ignoring)"
+chmod -R 755 "$CONFIG_DIR"
+
+log ""
+log "🚀 Starting OpenClaw Gateway on port 18789..."
+log "📂 Configuration File Content:"
+cat "$CONFIG_FILE"
+log ""
+
+# S6 Service Execution
+cd /opt/openclaw
+
+# Ensure HOME is correctly set for the persistent user environment
+export HOME=/config
+log "🏠 HOME set to: $HOME"
+
+log "🛠️ Executing node process (Supervised by S6)..."
+
+# Exec replaces the shell process with node, allowing signals to propagate
+# Using exec ensures S6 monitors the actual node process
+
+# DEBUG LOGGING
+export DEBUG="openclaw:*"
+
+log "🔧 Debug logging enabled (DEBUG=openclaw:*)"
+log "🔐 Device auth checks remain enabled (token auth via gateway config)"
+
+exec node dist/index.js gateway --bind lan --allow-unconfigured

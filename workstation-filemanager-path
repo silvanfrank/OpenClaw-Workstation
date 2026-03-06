@@ -1,0 +1,21 @@
+#!/usr/bin/with-contenv bash
+
+# Ensure Selkies upload/download directory is usable across redeploys.
+# Defaults to /config/uploads unless FILE_MANAGER_PATH is explicitly set.
+
+set -e
+
+TARGET_PATH="${FILE_MANAGER_PATH:-/config/uploads}"
+TARGET_USER="${CUSTOM_USER:-abc}"
+
+if ! id "$TARGET_USER" >/dev/null 2>&1; then
+  TARGET_USER="abc"
+fi
+
+TARGET_GROUP="$(id -gn "$TARGET_USER" 2>/dev/null || echo "$TARGET_USER")"
+
+mkdir -p "$TARGET_PATH"
+chown "$TARGET_USER:$TARGET_GROUP" "$TARGET_PATH" || true
+chmod 775 "$TARGET_PATH" || true
+
+echo "📂 File manager path ready: $TARGET_PATH (owner: $TARGET_USER:$TARGET_GROUP)"

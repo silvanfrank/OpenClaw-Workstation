@@ -1,0 +1,18 @@
+#!/usr/bin/with-contenv bash
+
+# Sync WORKSTATION_PASSWORD to system user 'abc' (LinuxServer.io default user)
+# This allows the custom env var to control Webtop authentication.
+
+if [ -n "$WORKSTATION_PASSWORD" ]; then
+    echo "🔒 Applying WORKSTATION_PASSWORD..."
+    # Set linux user password
+    echo "abc:$WORKSTATION_PASSWORD" | chpasswd
+    
+    # Inject PASSWORD into s6 container environment
+    echo -n "$WORKSTATION_PASSWORD" > /var/run/s6/container_environment/PASSWORD
+    
+    echo "✅ Password updated for user 'abc' and injected into s6 env."
+
+else
+    echo "⚠️ WORKSTATION_PASSWORD not set. Desktop access might be unprotected."
+fi
