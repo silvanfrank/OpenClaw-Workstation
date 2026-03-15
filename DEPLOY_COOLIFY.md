@@ -1,4 +1,4 @@
-# Deploying OpenClaw Workstation on Coolify (SECURE)
+# Deploying OpenClaw Workstation on Coolify
 
 This guide outlines how to deploy the **OpenClaw Workstation** — a full Linux desktop with integrated OpenClaw AI — using Coolify.
 
@@ -311,83 +311,16 @@ df -h
 docker system df
 ```
 
-### Disk Guardrails (Recommended)
+### Free Up Disk Space
 
-`docker system prune` is a useful safety net, but it should not be your primary disk strategy.
-
-Use this order of controls:
-
-1. **Enable Docker log rotation** (prevents unbounded `json-file` logs).
-2. **Monitor disk usage** (`df -h`, `docker system df -v`).
-3. **Auto-prune only when usage is high** (for example at 92%).
-
-#### 1) Set log rotation in Coolify
-
-In your service **General -> Custom Docker Options**, add:
+If you are running out of disk space, you can run the following command on your VPS to clean up unused Docker data:
 
 ```bash
---shm-size=2g --log-opt max-size=10m --log-opt max-file=5
-```
-
-This keeps container logs capped per container and avoids silent disk growth.
-
-#### 2) Optional auto-prune at 92% (host-level cron)
-
-Run on the VPS host (not inside the container):
-
-```bash
-cat >/usr/local/sbin/docker-auto-prune.sh <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-THRESHOLD=92
-USAGE=$(df -P /var/lib/docker | awk 'NR==2 {gsub("%","",$5); print $5}')
-
-if [ "$USAGE" -ge "$THRESHOLD" ]; then
-  echo "$(date -Is) usage=${USAGE}% >= ${THRESHOLD}%, running docker prune"
-  docker system prune -af --filter "until=168h"
-fi
-EOF
-
-chmod +x /usr/local/sbin/docker-auto-prune.sh
-
-cat >/etc/cron.d/docker-auto-prune <<'EOF'
-SHELL=/bin/bash
-PATH=/usr/sbin:/usr/bin:/sbin:/bin
-*/15 * * * * root /usr/bin/flock -n /run/docker-auto-prune.lock /usr/local/sbin/docker-auto-prune.sh >>/var/log/docker-auto-prune.log 2>&1
-EOF
-```
-
-Validate:
-
-```bash
-/usr/local/sbin/docker-auto-prune.sh
-tail -n 50 /var/log/docker-auto-prune.log
+docker system prune -a
 ```
 
 > [!WARNING]
 > Do **not** use `docker volume prune` blindly on production hosts. Named volumes may contain persistent app data.
->
-> `docker system prune -a` can remove unused images that speed up rollbacks/redeploys. Keep it as a high-watermark emergency cleanup, not a frequent routine.
-
-### View OpenClaw Logs
-From inside the desktop:
-**Option 1: In Coolify** (Recommended)
-Just click the **Logs** tab in your deployed service (this shows STDOUT/STDERR).
-
-**Option 2: Persistent File Logs** (Recommended for history)
-From inside the desktop:
-```bash
-cat /config/.openclaw/logs/openclaw.log
-tail -f /config/.openclaw/logs/openclaw.log
-```
-
-### Restart OpenClaw Gateway
-From inside the desktop:
-```bash
-pkill -f "openclaw gateway"
-openclaw gateway --bind lan --allow-unconfigured &
-```
 
 ---
 
