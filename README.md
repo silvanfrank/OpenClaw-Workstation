@@ -31,7 +31,7 @@ A full Linux desktop with OpenClaw AI pre-installed, accessible from your browse
 
 1. **Create New Resource** → **Private Repository (with App)**
 2. **Build Pack:** `Dockerfile`
-3. **Base Directory:** `/docs/Longtermtrends-Content/Agents/OpenClaw-Workstation`
+3. **Base Directory:** `/`
 4. **Dockerfile Location:** `/Dockerfile`
 5. **Ports Exposes:** `3000`
 

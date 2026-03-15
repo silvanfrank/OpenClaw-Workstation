@@ -36,6 +36,25 @@ This guide outlines how to deploy the **OpenClaw Workstation** — a full Linux 
 - **OpenRouter API Key** (`OPENROUTER_API_KEY`)
 - **4GB+ RAM** on your VPS (recommended for smooth desktop experience)
 
+### 2.1. Install Coolify (if needed)
+
+If you are setting up a fresh server (e.g., Ubuntu 24.04), follow these steps first:
+
+#### 1. Install Script
+Run this command to install Coolify:
+```bash
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
+```
+
+#### 2. Initial Configuration
+1. **Access UI:** Go to `http://[YOUR_SERVER_IP]:8000`.
+2. **Select Destination:** When prompted, select **localhost** (the server itself) as the deployment destination.
+3. **GitHub Integration:**
+   - Go to **Sources** -> **GitHub App**.
+   - Click **Add New GitHub App**.
+   - Follow the prompts to install the Coolify App on your GitHub account/organization.
+   - This allows Coolify to receive webhooks and deploy private repositories securely.
+
 ---
 
 ## 3. Coolify Configuration
@@ -45,7 +64,7 @@ This guide outlines how to deploy the **OpenClaw Workstation** — a full Linux 
 2. **Create New Resource:** Application → **Private Repository (with App)**
 3. **Repository Settings:**
    - **Source:** select your connected Git App
-   - **Repository:** `silvanfrank/longtermtrends2`
+   - **Repository:** `silvanfrank/OpenClaw-Workstation`
    - **Branch:** `master`
    - **Build Pack:** **Dockerfile**  ← IMPORTANT!
 
@@ -54,7 +73,7 @@ Navigate to **General** tab:
 
 | Setting | Value |
 |---------|-------|
-| **Base Directory** | `/docs/Longtermtrends-Content/Agents/OpenClaw-Workstation` |
+| **Base Directory** | `/` |
 | **Dockerfile Location** | `/Dockerfile` |
 
 **Network Settings:**
