@@ -106,14 +106,9 @@ Go to **Environment Variables** tab and add:
 #### AI Configuration
 | Key | Value | Description |
 |-----|-------|-------------|
-| `OPENROUTER_API_KEY` | `sk-or-...` | OpenRouter API key (required default provider) |
+| `OPENROUTER_API_KEY` | `sk-or-...` | OpenRouter API key (required) |
 | `OPENROUTER_API_BASE_URL` | `https://openrouter.ai/api/v1` | Optional endpoint override |
-| `OPENROUTER_MODEL_ID` | `minimax/minimax-m2.5` | Optional model override |
-| `GEMINI_API_KEY` | `AIza...` | Optional Google Gemini fallback |
-| `ANTHROPIC_API_KEY` | `sk-ant...` | Optional Anthropic fallback |
-| `OPENAI_API_KEY` | `sk-...` | Optional OpenAI fallback |
-| `BRAVE_API_KEY` | `BSA...` | Brave Search (for web search) |
-| `TELEGRAM_BOT_TOKEN` | `859...` | Telegram Bot Token (Optional) |
+| `OPENROUTER_MODEL_ID` | `minimax/minimax-m2.5` | Optional model override (Minimax is recommended) |
 
 #### Optional Settings
 | Key | Value | Description |

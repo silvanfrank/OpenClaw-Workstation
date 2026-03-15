@@ -44,12 +44,7 @@ Set these in Coolify's Environment Variables tab:
 | `OPENCLAW_TOKEN` | ✅ | Auth token (generate via `openssl rand -hex 32` or find auto-generated in logs) |
 | `OPENROUTER_API_KEY` | ✅ | OpenRouter key |
 | `OPENROUTER_API_BASE_URL` | ❌ | OpenRouter base URL (default: `https://openrouter.ai/api/v1`) |
-| `OPENROUTER_MODEL_ID` | ❌ | OpenRouter model ID (default: `minimax/minimax-m2.5`) |
-| `GEMINI_API_KEY` | ❌ | Google AI fallback key |
-| `ANTHROPIC_API_KEY` | ❌ | Anthropic fallback key |
-| `OPENAI_API_KEY` | ❌ | OpenAI fallback key |
-| `TELEGRAM_BOT_TOKEN` | ❌ | Telegram Bot Token |
-| `BRAVE_API_KEY` | ❌ | Brave Search key |
+| `OPENROUTER_MODEL_ID` | ❌ | OpenRouter model ID (Minimax is recommended: `minimax/minimax-m2.5`) |
 | `WORKSTATION_PASSWORD` | ✅ | Desktop password (CRITICAL FOR SECURITY) |
 | `CUSTOM_USER` | ❌ | Username (default: `abc`) |
 | `FILE_MANAGER_PATH` | ❌ | Sidebar upload/download path (default: `/config/uploads`) |
