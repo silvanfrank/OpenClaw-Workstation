@@ -280,20 +280,20 @@ The workstation now uses **Smart Merging**. This means:
 4. **Disable Browser Sleeping:** If you leave the tab inactive, some browsers (like Edge/Chrome) "sleep" the tab, killing the socket. Keep the tab active or use a "No Sleep" extension.
 
 ### Issue: OpenClaw not starting
-**Check the log inside the desktop:**
-Check the **deployment logs in Coolify** or run:
-```bash
-cat /config/.openclaw/logs/openclaw.log
-```
-
-**Or check if the process is running:**
-```bash
-ps aux | grep openclaw
-```
+The easiest way to debug is from the Coolify dashboard:
+1. **Check Logs:** Click on the **Logs** tab in your deployed service in Coolify. This shows real-time stdout/stderr from both the Linux desktop and OpenClaw.
+2. **Execute Commands:** Click on the **Terminal** tab in Coolify to drop into a shell inside the running container. From here you can see if the process is running:
+   ```bash
+   ps aux | grep openclaw
+   ```
+   Or view the persistent file logs directly:
+   ```bash
+   tail -n 100 /config/.openclaw/logs/openclaw.log
+   ```
 
 ### Issue: Desktop is slow or laggy
 - Use Chrome or Edge instead of Firefox (better WebSocket support)
-- Ensure VPS has 4GB+ RAM
+- Ensure VPS has 4GB+ RAM. You can check current memory usage by opening the **Terminal** tab in Coolify and running `free -h` or `htop`.
 - Check network latency to your VPS
 
 ### Issue: "HTTPS required" error
