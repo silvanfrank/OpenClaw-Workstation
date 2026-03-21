@@ -50,7 +50,7 @@ const openrouter = new OpenRouter({
 
 // Stream the response to get reasoning tokens in usage
 const stream = await openrouter.chat.send({
-  model: "minimax/minimax-m2.5",
+  model: "minimax/minimax-m2.7",
   messages: [
     {
       role: "user",
