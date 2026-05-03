@@ -50,7 +50,7 @@ const openrouter = new OpenRouter({
 
 // Stream the response to get reasoning tokens in usage
 const stream = await openrouter.chat.send({
-  model: "moonshotai/kimi-latest",
+  model: "moonshotai/kimi-k2.6",
   messages: [
     {
       role: "user",

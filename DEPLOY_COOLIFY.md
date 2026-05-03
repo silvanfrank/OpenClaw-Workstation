@@ -35,6 +35,13 @@ This guide outlines how to deploy the **OpenClaw Workstation** — a full Linux 
 - **Coolify instance** running
 - **OpenRouter API Key** (`OPENROUTER_API_KEY`)
 - **4GB+ RAM** on your VPS (recommended for smooth desktop experience)
+- **2+ vCPUs.** The container runs an XFCE desktop, the Selkies streaming
+  server (Xvfb + x264 encode), and the OpenClaw Node gateway in a single
+  process tree. With 1 vCPU the gateway's event loop saturates, RPC calls
+  go past 1s, and chat requests time out before producing a reply (visible
+  as "assistant turn failed before producing content"). If you must run on
+  1 vCPU, set `SELKIES_FRAMERATE=8` and `SELKIES_MANUAL_WIDTH=1024` /
+  `SELKIES_MANUAL_HEIGHT=600` in env vars to free up cycles for the gateway.
 
 ### 2.1. Install Coolify (if needed)
 
@@ -108,7 +115,7 @@ Go to **Environment Variables** tab and add:
 |-----|-------|-------------|
 | `OPENROUTER_API_KEY` | `sk-or-...` | OpenRouter API key (required) |
 | `OPENROUTER_API_BASE_URL` | `https://openrouter.ai/api/v1` | Optional endpoint override |
-| `OPENROUTER_MODEL_ID` | `moonshotai/kimi-latest` | Optional model override (Kimi is recommended) |
+| `OPENROUTER_MODEL_ID` | `moonshotai/kimi-k2.6` | Optional model override (Kimi is recommended) |
 
 #### Optional Settings
 | Key | Value | Description |
@@ -132,7 +139,44 @@ The container now auto-creates and permission-fixes `FILE_MANAGER_PATH` on boot,
 > [!CAUTION]
 > Never commit API keys to Git. Use Coolify's environment variables exclusively.
 
-### 3.4. Domain Configuration
+### 3.4. Resource Limits
+
+The container runs an XFCE desktop, the Selkies streaming server (Xvfb +
+x264), and the OpenClaw Node gateway in a single process tree. Without
+explicit limits, Selkies can saturate every available core during active
+streaming and starve the gateway's event loop — chat requests then time
+out before producing a reply ("assistant turn failed before producing
+content"). Allocate enough headroom up front.
+
+In Coolify: **Configuration → Resource Limits**. Recommended values for a
+4-vCPU / 8 GB host (e.g. Hetzner CAX21):
+
+| Field | Value | Notes |
+|---|---|---|
+| Number of CPUs | `3` | Leave 1 core for the host OS + Coolify |
+| CPU sets to use | *(blank)* | Pinning is rarely useful here |
+| CPU Weight | `1024` | Default |
+| Soft Memory Limit | `0` | Default |
+| Swappiness | `60` | Default |
+| Maximum Memory Limit | `6G` | Leave ~2 GB for the host |
+| Maximum Swap Limit | `0` | Default |
+
+For a 2-vCPU host, use `Number of CPUs = 1.5` and `Maximum Memory Limit =
+3G`. Do not deploy on a 1-vCPU host — the gateway will not stay
+responsive under streaming load even with maximum tuning.
+
+After saving, **Redeploy** (not Restart) — limits apply at container
+creation, so the container has to be recreated.
+
+Verify from inside the workstation terminal:
+
+```bash
+nproc                       # should show your configured CPU count
+cat /sys/fs/cgroup/cpu.max  # e.g. "300000 100000" = 3 vCPUs of quota
+free -h                     # available memory should match the limit
+```
+
+### 3.5. Domain Configuration
 
 You only need **one domain** for the workstation:
 
@@ -142,7 +186,7 @@ You only need **one domain** for the workstation:
 
 > OpenClaw is accessed from *inside* the desktop at `localhost:18789`, not via a separate external domain.
 
-### 3.5. Deploy
+### 3.6. Deploy
 1. Click **Deploy**
 2. Watch build logs. It will:
    - Build custom image (Webtop + Node.js + OpenClaw)
@@ -300,6 +344,49 @@ The easiest way to debug is from the Coolify dashboard:
 - The Webtop image requires HTTPS
 - Ensure your domain uses `https://` not `http://`
 - Wait for Coolify to provision the SSL certificate (can take 1-2 minutes)
+
+### Issue: "assistant turn failed before producing content" (chat hangs / no reply)
+
+Two common causes, in order of likelihood:
+
+**1. Invalid model slug.** Look in the gateway log for
+`FailoverError: 400 <slug> is not a valid model ID`. OpenRouter rejects
+slugs like `moonshotai/kimi-latest` — they need a versioned form
+(e.g. `moonshotai/kimi-k2.6`). Fix: set `OPENROUTER_MODEL_ID` in Coolify
+env vars to a valid slug from `https://openrouter.ai/models`, then redeploy.
+
+**2. CPU starvation.** Hit `/health` on the gateway: if `eventLoop.degraded: true`
+with `event_loop_utilization` and `cpu` in `reasons`, and `utilization: 1`,
+the Selkies streaming server is starving the Node event loop. Fixes,
+in order:
+
+1. Allocate 2+ vCPUs to the container in Coolify (see section 3.4).
+2. Lower the streaming load via env vars: `SELKIES_FRAMERATE=10`,
+   `SELKIES_MANUAL_WIDTH=1280`, `SELKIES_MANUAL_HEIGHT=720`,
+   `SELKIES_H264_CRF=38`, `SELKIES_SECOND_SCREEN=false`.
+3. Disconnect the desktop browser tab when not actively using it — Selkies
+   stops encoding when no client is connected, freeing the CPU for the
+   gateway.
+
+### Issue: Gateway crash-loops with `channels.telegram: invalid config: must NOT have additional properties`
+
+OpenClaw's schema for `channels.telegram` only accepts `{ tokenFile }` now;
+older builds wrote `botToken`/`dmPolicy`/`groupPolicy`/`streamMode`/`allowFrom`
+inline, which the validator rejects fatally. The `openclaw-run` script
+unconditionally strips those fields and rewrites the channel from
+`TELEGRAM_BOT_TOKEN` on every start. If you still see this error after
+deploying, the per-deploy persistent volume holds a stale config that the
+script isn't reaching — exec into the container and run:
+
+```bash
+jq 'del(.channels.telegram) | .channels.telegram = { "tokenFile": "/config/.openclaw/credentials/telegram-bot-token" }' \
+  /config/.openclaw/openclaw.json > /tmp/c.json && mv /tmp/c.json /config/.openclaw/openclaw.json
+```
+
+Note: legacy options (`dmPolicy`, `groupPolicy`, `allowFrom`, `streamMode`)
+have moved to `plugins.entries.telegram` in the new schema. The script does
+not currently migrate them — re-add via the OpenClaw control UI if you need
+the bot allowlist back.
 
 ---
 

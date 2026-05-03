@@ -61,13 +61,20 @@ ENV NODE_ENV=production
 # Persisted upload/download target for Selkies sidebar file manager.
 # Can be overridden in Coolify.
 ENV FILE_MANAGER_PATH=/config/uploads
-# Selkies desktop-stream tuning defaults (override in Coolify env vars if needed)
+# Selkies desktop-stream tuning defaults (override in Coolify env vars if needed).
+# Tuned for ~3 vCPUs allocated to the container (e.g. Hetzner CAX21 with 1
+# core left for the host) — Selkies + Xvfb + x264 encoding compete with the
+# OpenClaw Node gateway for CPU, so the framerate/resolution can't go too
+# high without saturating the event loop and timing out chat requests.
+# If you only have ≤2 vCPUs, drop framerate to 10 and resolution to 1280×720.
 ENV START_DOCKER=false
 ENV SELKIES_MANUAL_WIDTH=1600
 ENV SELKIES_MANUAL_HEIGHT=900
 ENV MAX_RESOLUTION=1920x1080
-ENV SELKIES_FRAMERATE=24
+ENV SELKIES_FRAMERATE=20
 ENV SELKIES_H264_CRF=30
+# Disable second-monitor support; it doubles capture/encode work.
+ENV SELKIES_SECOND_SCREEN=false
 
 # Expose ports
 # 3000 = Webtop desktop UI
