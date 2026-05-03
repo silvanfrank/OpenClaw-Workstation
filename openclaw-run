@@ -267,16 +267,33 @@ if [ -n "$CONTROL_UI_ALLOWED_ORIGINS_JSON" ] && [ "$CONTROL_UI_ALLOWED_ORIGINS_J
      "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 fi
 
-# Update channels if environment variables are provided
-# Note: This updates the config if the ENV is set, but won't delete existing config if ENV is missing
+# Strip legacy channel fields the current schema rejects, before re-applying
+# from ENV. Older builds wrote botToken/dmPolicy/groupPolicy/streamMode/allowFrom
+# directly under channels.telegram, which now fails schema validation
+# ("must NOT have additional properties"). The new shape is { tokenFile }.
+jq 'if .channels.telegram then
+      .channels.telegram |= with_entries(select(.key == "tokenFile" or .key == "enabled"))
+    else . end
+    | if .channels.discord then
+        .channels.discord |= with_entries(select(.key == "tokenFile" or .key == "enabled"))
+      else . end' \
+   "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
+# Update channels if environment variables are provided.
+# Tokens are written to files under $CREDENTIALS_DIR (already done above) and
+# referenced via tokenFile, matching the schema used at first-boot (line 148).
 if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
     log "📱 Configuring Telegram from ENV..."
-    jq ".channels.telegram = { \"enabled\": true, \"botToken\": \"$TELEGRAM_BOT_TOKEN\", \"dmPolicy\": \"pairing\", \"groupPolicy\": \"allowlist\", \"streamMode\": \"partial\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    jq --arg tokenFile "$CREDENTIALS_DIR/telegram-bot-token" \
+       '.channels.telegram = { "tokenFile": $tokenFile }' \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 fi
 
 if [ -n "$DISCORD_BOT_TOKEN" ]; then
     log "📱 Configuring Discord from ENV..."
-    jq ".channels.discord = { \"enabled\": true, \"botToken\": \"$DISCORD_BOT_TOKEN\" }" "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    jq --arg tokenFile "$CREDENTIALS_DIR/discord-bot-token" \
+       '.channels.discord = { "tokenFile": $tokenFile }' \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 fi
 
 log "✅ Gateway config updated/verified at $CONFIG_FILE"
