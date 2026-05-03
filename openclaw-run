@@ -267,21 +267,17 @@ if [ -n "$CONTROL_UI_ALLOWED_ORIGINS_JSON" ] && [ "$CONTROL_UI_ALLOWED_ORIGINS_J
      "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 fi
 
-# Strip legacy channel fields the current schema rejects, before re-applying
-# from ENV. Older builds wrote botToken/dmPolicy/groupPolicy/streamMode/allowFrom
-# directly under channels.telegram, which now fails schema validation
-# ("must NOT have additional properties"). The new shape is { tokenFile }.
-jq 'if .channels.telegram then
-      .channels.telegram |= with_entries(select(.key == "tokenFile" or .key == "enabled"))
-    else . end
-    | if .channels.discord then
-        .channels.discord |= with_entries(select(.key == "tokenFile" or .key == "enabled"))
-      else . end' \
+# Drop any persisted channel blocks before re-applying from ENV. Older builds
+# wrote botToken/dmPolicy/groupPolicy/streamMode/allowFrom directly under
+# channels.telegram, which the current schema rejects with "must NOT have
+# additional properties" — fatally crash-looping the gateway. We unconditionally
+# remove and rebuild from ENV (single source of truth) so a stale field can
+# never survive a restart.
+jq 'del(.channels.telegram, .channels.discord, .channels.slack)' \
    "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
-# Update channels if environment variables are provided.
-# Tokens are written to files under $CREDENTIALS_DIR (already done above) and
-# referenced via tokenFile, matching the schema used at first-boot (line 148).
+# Re-apply channels from ENV using the modern { tokenFile } shape, matching
+# what the first-boot template at line 148 already does.
 if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
     log "📱 Configuring Telegram from ENV..."
     jq --arg tokenFile "$CREDENTIALS_DIR/telegram-bot-token" \
@@ -295,6 +291,18 @@ if [ -n "$DISCORD_BOT_TOKEN" ]; then
        '.channels.discord = { "tokenFile": $tokenFile }' \
        "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 fi
+
+if [ -n "$SLACK_BOT_TOKEN" ] && [ -n "$SLACK_APP_TOKEN" ]; then
+    log "📱 Configuring Slack from ENV..."
+    jq --arg botTokenFile "$CREDENTIALS_DIR/slack-bot-token" \
+       --arg appTokenFile "$CREDENTIALS_DIR/slack-app-token" \
+       '.channels.slack = { "botTokenFile": $botTokenFile, "appTokenFile": $appTokenFile }' \
+       "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+fi
+
+# If no channels remain, drop the empty parent so the gateway doesn't see {}.
+jq 'if (.channels // {}) == {} then del(.channels) else . end' \
+   "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
 
 log "✅ Gateway config updated/verified at $CONFIG_FILE"
 
