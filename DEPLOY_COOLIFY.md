@@ -108,7 +108,7 @@ Go to **Environment Variables** tab and add:
 |-----|-------|-------------|
 | `OPENROUTER_API_KEY` | `sk-or-...` | OpenRouter API key (required) |
 | `OPENROUTER_API_BASE_URL` | `https://openrouter.ai/api/v1` | Optional endpoint override |
-| `OPENROUTER_MODEL_ID` | `minimax/minimax-m2.7` | Optional model override (Minimax is recommended) |
+| `OPENROUTER_MODEL_ID` | `moonshotai/kimi-latest` | Optional model override (Kimi is recommended) |
 
 #### Optional Settings
 | Key | Value | Description |
