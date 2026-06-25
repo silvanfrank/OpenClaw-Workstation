@@ -115,7 +115,7 @@ Go to **Environment Variables** tab and add:
 |-----|-------|-------------|
 | `OPENROUTER_API_KEY` | `sk-or-...` | OpenRouter API key (required) |
 | `OPENROUTER_API_BASE_URL` | `https://openrouter.ai/api/v1` | Optional endpoint override |
-| `OPENROUTER_MODEL_ID` | `moonshotai/kimi-k2.6` | Optional model override (Kimi is recommended) |
+| `OPENROUTER_MODEL_ID` | `minimax/minimax-m3` | Optional model override (MiniMax M3 is recommended) |
 
 #### Optional Settings
 | Key | Value | Description |
@@ -351,8 +351,8 @@ Two common causes, in order of likelihood:
 
 **1. Invalid model slug.** Look in the gateway log for
 `FailoverError: 400 <slug> is not a valid model ID`. OpenRouter rejects
-slugs like `moonshotai/kimi-latest` — they need a versioned form
-(e.g. `moonshotai/kimi-k2.6`). Fix: set `OPENROUTER_MODEL_ID` in Coolify
+slugs like `minimax/m3` instead of the exact provider slug
+(e.g. `minimax/minimax-m3`). Fix: set `OPENROUTER_MODEL_ID` in Coolify
 env vars to a valid slug from `https://openrouter.ai/models`, then redeploy.
 
 **2. CPU starvation.** Hit `/health` on the gateway: if `eventLoop.degraded: true`

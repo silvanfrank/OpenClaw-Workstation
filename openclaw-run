@@ -85,7 +85,7 @@ fi
 
 # OpenRouter defaults (OpenAI-compatible endpoint)
 OPENROUTER_API_BASE_URL="${OPENROUTER_API_BASE_URL:-https://openrouter.ai/api/v1}"
-OPENROUTER_MODEL_ID="${OPENROUTER_MODEL_ID:-moonshotai/kimi-k2.6}"
+OPENROUTER_MODEL_ID="${OPENROUTER_MODEL_ID:-minimax/minimax-m3}"
 OPENROUTER_MODEL_REF="openrouter/$OPENROUTER_MODEL_ID"
 
 # Determine default model
@@ -203,7 +203,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
         "models": [
           {
             "id": "$OPENROUTER_MODEL_ID",
-            "name": "Kimi (Moonshot AI / OpenRouter)",
+            "name": "MiniMax M3 (OpenRouter)",
             "reasoning": true,
             "input": ["text"],
             "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
@@ -246,7 +246,7 @@ else
           "models": [
             {
               "id": $modelId,
-              "name": "Kimi (Moonshot AI / OpenRouter)",
+              "name": "MiniMax M3 (OpenRouter)",
               "reasoning": true,
               "input": ["text"],
               "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
